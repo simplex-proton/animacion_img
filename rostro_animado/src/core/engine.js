@@ -1,4 +1,4 @@
-//+++ rostro_animado/src/core/engine.js (修改后)
+// rostro_animado/src/core/engine.js
 /* ============================================================
  * engine.js — Capa de motor (depende de geometry / render / features / fx; consume datos puros de emotions.js)
  *
@@ -101,19 +101,17 @@
   function hslToHex(h, s, l) {
     h = ((h % 360) + 360) % 360 / 360;
     s = clamp(s, 0, 1); l = clamp(l, 0, 1);
-    function f(q, t) {
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s;   /* C = (1-|2L-1|)·S */
+    var p = 2 * l - q;                                /* X = C·(1-|2t-1|) base */
+    function f(t) {
       if (t < 0) t += 1;
       if (t > 1) t -= 1;
-      if (t < 1 / 6) return q + (s === 0 ? 0 : (l < 0.5 ? l * (1 + s) : s + l - s * l) - q) * 6 * t;
-      if (t < 1 / 2) return l < 0.5 ? l * (1 + s) : s + l - s * l;
-      if (t < 2 / 3) {
-        var p = l < 0.5 ? l * (1 - s) : (s + l - s * l) / (2 - s);
-        return p + ((l < 0.5 ? l * (1 + s) : s + l - s * l) - p) * (2 / 3 - t) * 6;
-      }
-      return q;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
     }
-    var q = l < 0.5 ? l * (1 + s) : s + l - s * l;
-    return rgbToHex(f(q, h + 1 / 3) * 255, f(q, h) * 255, f(q, h - 1 / 3) * 255);
+    return rgbToHex(f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255);
   }
 
   /** Deriva los estados semánticos desde bodyHex; `declared` tiene prioridad */
@@ -442,7 +440,7 @@
     }
   }
 
-  /* ---------------- Centro de registros de emociones (configuración original compartida por todos los personajes) ----------------
+  /* ---------------- Centro de registros de emociones (configuración original compartida por todos los personajes) ---------------- */
 
   var GROUPS = (window.EMOTION_GROUPS || [
     { key: 'life',    name: 'Ciclo de vida',     en: 'Lifecycle' },
@@ -732,7 +730,7 @@
     if (!ch) throw new Error('MoodMates.create: no se ha registrado ningún personaje (cargue primero src/characters/*.js)');
     this.character = ch;
 
-    this.ball = MM.createBall(el, Object.assign({}, opts, {
+    this.ball = window.createBall(el, Object.assign({}, opts, {
       character: ch,
       lite: opts.lite != null ? opts.lite : opts.autostart === false
     }));
@@ -758,7 +756,7 @@
     this._defs = new Map();
     this._defsVersion = -1;
 
-    /* ---- sistema de deformación del anillo ocular (impulsado por ranuras) ----
+    /* ---- sistema de deformación del anillo ocular (impulsado por ranuras) ---- */
     var calm = ch.eyeFamily.calm;
     this._ringSrc = [calm[0], calm[1]];
     this._ringDst = [calm[0], calm[1]];
@@ -877,8 +875,21 @@
 
       this._poolPos = 0;
       this._mouthHoldUntil = 0;
-      this._setExpr(def.pool[0], def.poolSpeed >= 10 ? 10 : 8);
-      this._setMouth(def.mouth, 8);
+      /* Transiciones en capas (layered): la pose base / rubor viaja con el lerp global,
+       * pero ojos y boca entran desfasados (~80 ms de retraso entre grupos) para que el
+       * cambio se lea como un gesto natural escalonado, no como un corte sincronizado */
+      if (this._layered && prevId !== null && prevId !== def.id && !def.sequence) {
+        var self = this;
+        setTimeout(function () {
+          if (self._def === def) self._setExpr(def.pool[0], def.poolSpeed >= 10 ? 10 : 8);
+        }, 70);
+        setTimeout(function () {
+          if (self._def === def) self._setMouth(def.mouth, 8);
+        }, 150);
+      } else {
+        this._setExpr(def.pool[0], def.poolSpeed >= 10 ? 10 : 8);
+        this._setMouth(def.mouth, 8);
+      }
       this._poolNext = now + rand(def.poolMs[0], def.poolMs[1]);
       if (prevId !== null && prevId !== def.id && def.blinkMs) this._blinkNow(now);
       this._blinkNext = def.blinkMs ? now + rand(def.blinkMs[0], def.blinkMs[1]) : Infinity;
@@ -925,7 +936,9 @@
     /* ---------- recorrido automático ---------- */
     startTour: function (ids, interval) {
       this.stopTour();
-      if (!ids || !ids.length) return;
+      if (ids) ids = ids.filter(function (id) { return MM.config.isEnabled(id); });
+      if (!ids || !ids.length) ids = MM.config.enabledIds();
+      if (!ids.length) return;
       interval = interval || 2500;
       this._touring = true;
       var self = this, i = 0;
@@ -1079,14 +1092,46 @@
       this._mouthSlot = slot;
     },
 
-    /* Fotogramas clave de parpadeo: cerrar → pausa 70ms → abrir a 1.08 (sobrepaso) → 300ms volver a 1 */
+    /* Parpadeo: estándar = cerrar → pausa 70ms → abrir a 1.08 (sobrepaso) → 300ms volver a 1.
+     * Con blinkProfile activo cambia la FORMA del parpadeo según la emoción:
+     *   thinking → entrecierre parcial + micro-ojeada lateral durante el cierre
+     *   heavy    → párpados pesados: caída lenta, pausa larga, recuperación perezosa
+     *   nervous  → ráfagas cortas e irregulares */
     _blinkNow: function (t) {
+      var pr = (this._def && this._def.blinkProfile) ? BLINK_PROFILES[this._def.blinkProfile] : null;
+      if (!pr) {
+        this._blinkQ.push(
+          { at: t, v: 0.05 }, { at: t + 70, v: 0.05 },
+          { at: t + 150, v: 1.08 }, { at: t + 300, v: 1 }
+        );
+        if (Math.random() < 0.14) {
+          this._blinkQ.push({ at: t + 370, v: 0.05 }, { at: t + 480, v: 1 });
+        }
+        return;
+      }
+      var d = pr.depth == null ? 1 : pr.depth;
+      var vC = 0.05 + (1 - d) * 0.9;               /* profundidad de cierre (entrecierre si d<1) */
+      var close = pr.close || 120, pause = pr.pause || 70, rise = pr.rise || 150;
       this._blinkQ.push(
-        { at: t, v: 0.05 }, { at: t + 70, v: 0.05 },
-        { at: t + 150, v: 1.08 }, { at: t + 300, v: 1 }
+        { at: t, v: vC }, { at: t + close, v: vC },
+        { at: t + close + pause, v: 1.06 }, { at: t + close + pause + rise, v: 1 }
       );
-      if (Math.random() < 0.14) {
-        this._blinkQ.push({ at: t + 370, v: 0.05 }, { at: t + 480, v: 1 });
+      if (pr.glance) {
+        /* pensando: ojeada lateral mientras el párpado está entornado */
+        this._gaze.tx += rand(-6, 6);
+      }
+      if (pr.settle) {
+        /* heavy: segunda caída perezosa antes de asentarse del todo */
+        var s2 = t + close + pause + rise;
+        this._blinkQ.push(
+          { at: s2 + pr.settle * 0.4, v: vC + (1 - vC) * 0.45 },
+          { at: s2 + pr.settle, v: 1 }
+        );
+      }
+      if (pr.burstChance && Math.random() < pr.burstChance) {
+        /* nervous: refugio de ráfaga tras el primer parpadeo */
+        var b2 = t + close + pause + rise + 90;
+        this._blinkQ.push({ at: b2, v: vC }, { at: b2 + 80, v: 1 });
       }
     },
 
@@ -1267,12 +1312,32 @@
       }
       pose.face.mouthRing = this._mouthCur;
 
-      /* mirada del ratón: suavizado exponencial independiente de la tasa de fotogramas */
-      var k = 1 - Math.exp(-5.66 * dt);
+      /* Mirada: con saccades activos el ojo salta a micro-destinos (transición casi
+       * instantánea + sobreimpulso ~4% + fijación), imitando el movimiento sacádico real;
+       * sin ellos, suavizado exponencial independiente de la tasa de fotogramas */
       var gx = def.gaze !== false ? this._gaze.tx : 0;
       var gy = def.gaze !== false ? this._gaze.ty : 0;
-      this._gaze.x += (gx - this._gaze.x) * k;
-      this._gaze.y += (gy - this._gaze.y) * k;
+      if (this._saccades && this._active && def.gaze !== false) {
+        if (now >= this._sac.next) {
+          var baseX = gx || 0, baseY = gy || 0;
+          this._sac.x = baseX + rand(-7, 7);
+          this._sac.y = baseY + rand(-4, 4);
+          this._sac.next = now + rand(260, 900);
+          this._sac.over = 1;                      /* flag de fase de sobreimpulso */
+        }
+        var ks = 1 - Math.exp(-26 * dt);           /* muy rápido ≈ salto sacádico */
+        this._gaze.x += (this._sac.x - this._gaze.x) * ks;
+        this._gaze.y += (this._sac.y - this._gaze.y) * ks;
+        if (this._sac.over && Math.abs(this._sac.x - this._gaze.x) < 0.6) {
+          this._gaze.x += (this._sac.x - gx > 0 ? 1 : -1) * 0.9;   /* micro-overshoot ~4% */
+          this._sac.over = 0;
+        }
+      } else {
+        var k = 1 - Math.exp(-5.66 * dt);
+        this._sac.x = gx; this._sac.y = gy;
+        this._gaze.x += (gx - this._gaze.x) * k;
+        this._gaze.y += (gy - this._gaze.y) * k;
+      }
       pose.left.lookX += this._gaze.x;
       pose.right.lookX += this._gaze.x;
       pose.left.lookY += this._gaze.y;

@@ -1,3 +1,4 @@
+//+++ rostro_animado/src/characters/nimbo.js
 /* ============================================================
  * Nimbo Nubes (general) — Nube esponjosa
  *   Concepto definitivo: assets/concepts/concept-nimbo.png alternativa A (azul niebla / lavanda)
@@ -47,6 +48,13 @@ window.MoodMates.characters.register({
   },
 
   fxSkin: 'cloudpuff',
+  /* Variantes de paleta: solo `body` + color de ojo; los 7 estados se derivan automáticamente
+   * por auto-palette HSL (ver docs/DESIGN-PROVENANCE.md §12) */
+  variants: {
+    menta:  { name: 'Menta',  en: { name: 'Mint' },   palette: { body: '#A8E0CC', eye: '#234038', zzz: '#8FC4B0' } },
+    aurora: { name: 'Aurora', en: { name: 'Aurora' }, palette: { body: '#D3B9F0', eye: '#362B52', zzz: '#B79AD6' } },
+    brisa:  { name: 'Brisa',  en: { name: 'Breeze' }, palette: { body: '#F2C6AA', eye: '#4A3028', zzz: '#D9A98C', blush: '#E98F9B' }, face: { y: 3 } }
+  },
 
   /* Solo se usa al hacer clic en celebrate(), no entra en el catálogo */
   celebrateBeat: {

@@ -1,0 +1,170 @@
+--- rostro_animado/data/emotions.schema.json (原始)
+
+
++++ rostro_animado/data/emotions.schema.json (修改后)
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://simplex-proton.github.io/animacion_img/rostro_animado/data/emotions.schema.json",
+  "title": "Catálogo de emociones MoodMates",
+  "description": "Formato de data/emotions.json consumido por MM.config.loadFromUrl(). Acepta también un array plano de emociones.",
+  "type": "object",
+  "required": ["emotions"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "string", "description": "Fecha o número de versión del catálogo" },
+    "generatedBy": { "type": "string" },
+    "presets": {
+      "type": "object",
+      "description": "Presets nombrados registrados vía MM.config.registerPreset al importar",
+      "additionalProperties": { "$ref": "#/definitions/preset" }
+    },
+    "emotions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/emotion" }
+    }
+  },
+  "definitions": {
+    "preset": {
+      "type": "object",
+      "properties": {
+        "poolMs": { "$ref": "#/definitions/range" },
+        "blinkMs": { "oneOf": [{ "$ref": "#/definitions/range" }, { "type": "null" }] },
+        "breathe": { "type": "number", "minimum": 0, "maximum": 0.05 },
+        "poolSpeed": { "type": "number", "minimum": 1, "maximum": 12 },
+        "antics": { "type": "boolean" },
+        "blinkS": { "enum": ["thinking", "heavy", "nervous"] }
+      },
+      "additionalProperties": false
+    },
+    "range": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "number", "minimum": 0 }
+    },
+    "emotion": {
+      "type": "object",
+      "required": ["id", "name", "group"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^(0[0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|[5-9][0-9])$",
+          "description": "NN · decena = grupo: 00-09 vida, 10-29 emociones, 30-49 agente IA, 50+ personalizado"
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "en": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "desc": { "type": "string" }
+          }
+        },
+        "group": { "enum": ["life", "emotion", "agent", "custom"] },
+        "desc": { "type": "string" },
+        "enabled": { "type": "boolean", "default": true, "description": "false oculta del catálogo sin borrarla" },
+        "presets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Nombres de preset a expandir antes de normalizar"
+        },
+        "pool": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Slots de forma de ojo (calm/happy/squint/… o eyeShapes propios del personaje)"
+        },
+        "poolMs": { "$ref": "#/definitions/range" },
+        "poolSpeed": { "type": "number", "minimum": 1, "maximum": 12 },
+        "blinkMs": { "oneOf": [{ "$ref": "#/definitions/range" }, { "type": "null" }] },
+        "blinkProfile": { "enum": ["thinking", "heavy", "nervous"] },
+        "openness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "antics": { "type": "boolean" },
+        "gaze": { "type": "boolean" },
+        "transition": { "type": "number", "minimum": 0 },
+        "mouth": { "enum": ["smile", "grin", "o", "flat", "frown", "wavy", "pout", "open", "dot"] },
+        "face": {
+          "type": "object",
+          "properties": {
+            "blush": { "type": "number", "minimum": 0, "maximum": 1 },
+            "browVis": { "type": "number", "minimum": 0, "maximum": 1 },
+            "browTilt": { "type": "number" },
+            "browRaise": { "type": "number" },
+            "mouthX": { "type": "number" },
+            "mouthY": { "type": "number" },
+            "mouthSX": { "type": "number" },
+            "mouthSY": { "type": "number" }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" }, "y": { "type": "number" },
+            "scale": { "type": "number" }, "rotate": { "type": "number" },
+            "color": { "type": "string" }, "breathe": { "type": "number" },
+            "spinFx": { "type": "number", "minimum": 0, "maximum": 1 },
+            "confetti": { "type": "number", "minimum": 0, "maximum": 1 },
+            "zzz": { "type": "number", "minimum": 0, "maximum": 1 },
+            "orbit": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "eyes": {
+          "type": "object",
+          "properties": {
+            "both": { "type": "object" },
+            "left": { "type": "object" },
+            "right": { "type": "object" }
+          }
+        },
+        "anims": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "enum": ["sine", "pulse", "jitter", "scan", "glance", "blink"] },
+              "target": { "enum": ["body", "eyes", "left", "right", "face"] },
+              "prop": { "type": "string" },
+              "amp": { "type": "number" },
+              "period": { "type": "number" },
+              "phase": { "type": "number" },
+              "phaseMs": { "type": "number" },
+              "speed": { "type": "number" },
+              "decay": { "type": "number" },
+              "interval": { "type": "number" },
+              "dur": { "type": "number" },
+              "depth": { "type": "number" }
+            }
+          }
+        },
+        "sequence": {
+          "type": "object",
+          "required": ["frames"],
+          "properties": {
+            "settle": {
+              "oneOf": [
+                { "enum": ["base", "hold"] },
+                { "type": "object", "required": ["next"], "properties": { "next": { "type": "string" } } }
+              ]
+            },
+            "frames": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["at"],
+                "properties": {
+                  "at": { "type": "number", "minimum": 0 },
+                  "body": { "type": "object" },
+                  "eyes": { "type": "object" },
+                  "face": { "type": "object" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
