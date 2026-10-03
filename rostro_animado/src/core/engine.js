@@ -730,7 +730,8 @@
     if (!ch) throw new Error('MoodMates.create: no se ha registrado ningún personaje (cargue primero src/characters/*.js)');
     this.character = ch;
 
-    this.ball = window.createBall(el, Object.assign({}, opts, {
+    //this.ball = window.createBall(el, Object.assign({}, opts, {
+    this.ball = MM.createBall(el, Object.assign({}, opts, {
       character: ch,
       lite: opts.lite != null ? opts.lite : opts.autostart === false
     }));
