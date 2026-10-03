@@ -829,23 +829,43 @@
   });
 
   /* ---------------- Inicialización ---------------- */
-  I.set(prefs.lang);
-  setTheme(prefs.theme, true);
-  setMode(prefs.mode);
-  elSketchToggle.checked = !!prefs.sketch;
-  elTourInterval.value = String(prefs.tourMs);
-  if (!elTourInterval.value) { elTourInterval.value = '2500'; prefs.tourMs = 2500; }
-  fillCharSelect();
-  enhanceSelect(elCharSelect);
-  enhanceSelect(elVariantSelect);
-  enhanceSelect(elTourInterval);
+  function init() {
+    I.set(prefs.lang);
+    setTheme(prefs.theme, true);
+    setMode(prefs.mode);
+    elSketchToggle.checked = !!prefs.sketch;
+    elTourInterval.value = String(prefs.tourMs);
+    if (!elTourInterval.value) { elTourInterval.value = '2500'; prefs.tourMs = 2500; }
+    fillCharSelect();
+    enhanceSelect(elCharSelect);
+    enhanceSelect(elVariantSelect);
+    enhanceSelect(elTourInterval);
 
-  createMain(prefs.character);
-  buildCast();
-  buildBrand();
-  buildHero();
-  applyI18n();
-  buildThumbs();
-  updateMeta();
-  highlightSelected();
+    createMain(prefs.character);
+    buildCast();
+    buildBrand();
+    buildHero();
+    applyI18n();
+    buildThumbs();
+    updateMeta();
+    highlightSelected();
+  }
+
+  /* Catálogo externo opcional: si existe data/emotions.json se aplica antes de arrancar.
+   * loadFromUrl nunca rechaza: ante cualquier fallo seguimos con el seed embebido.
+   * En file:// (sin servidor) o sin fetch, iniciamos directamente. */
+  function boot() {
+    var url = window.MM_EMOTIONS_URL || 'data/emotions.json';
+    if (location.protocol === 'file:' || typeof fetch !== 'function') { init(); return; }
+    MM.config.loadFromUrl(url).then(function (r) {
+      if (!r.ok && r.added === 0 && r.errors && r.errors.length &&
+          String(r.errors[0]).indexOf('HTTP') === 0) {
+        /* 404 u otro error de red: comportamiento normal sin catálogo externo */
+      } else if (!r.ok) {
+        console.warn('[MoodMates] ' + url + ' no aplicado del todo, se conserva el seed embebido para lo inválido:', r.errors);
+      }
+      init();
+    });
+  }
+  boot();
 })();

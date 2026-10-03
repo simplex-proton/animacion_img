@@ -62,6 +62,26 @@ window.MoodMates.characters.register({
   },
 
   fxSkin: 'stardust',
+  /* Variantes completas (v1.9): paleta + iris + rasgos + parches de emoción */
+  variants: {
+    lunar: {
+      name: 'Lunar', en: { name: 'Lunar' },
+      palette: { body: '#C9D3E8', eye: '#2E3A55', zzz: '#9AA8C8', fx: ['#C9D3E8', '#E8EEF8', '#9FB3D6', '#F5E6A8'] },
+      eyeStyle: { pupil: { irisColor: '#3E4F7A' } },
+      features: { accessories: [{ kind: 'glasses', color: '#8A97B8', fit: 1.3, strokeWidth: 2.6, glintPeriod: 5200 }] }
+    },
+    coral: {
+      name: 'Coral', en: { name: 'Coral' },
+      palette: { body: '#F28F7A', eye: '#4A2A22', zzz: '#D9806C' },
+      eyeStyle: { pupil: { irisColor: '#6B3A2A' } }
+    },
+    jade: {
+      name: 'Jade', en: { name: 'Jade' },
+      palette: { body: '#7FD1A8', eye: '#1F3D33', zzz: '#6BB38F' },
+      eyeStyle: { pupil: { irisColor: '#2F6B55' } },
+      emotions: { '02': { poolMs: [14000, 22000] } }
+    }
+  },
 
   /* El profesor entusiasta se emociona más cuando aciertas */
   emotions: {

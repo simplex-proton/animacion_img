@@ -80,6 +80,57 @@
     return rgbToHex(lerp(A[0], B[0], t), lerp(A[1], B[1], t), lerp(A[2], B[2], t));
   }
 
+  /* ---------------- Auto-palette: derivación HSL de los estados semánticos ----------------
+   * A partir de un único palette.body se generan los 7 tokens @dim @soft @blush @angry @off
+   * (y zzz como sombra fría del cuerpo). Los estados declarados explícitamente en la paleta
+   * siempre mandan sobre el derivado. @alert es fijo (#E25B5B, alarma estándar del catálogo). */
+
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b);
+    var h = 0, s = 0, l = (max + min) / 2, d = max - min;
+    if (d > 0) {
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+      else if (max === g) h = ((b - r) / d + 2) / 6;
+      else h = ((r - g) / d + 4) / 6;
+    }
+    return [h * 360, s, l];
+  }
+  function hslToHex(h, s, l) {
+    h = ((h % 360) + 360) % 360 / 360;
+    s = clamp(s, 0, 1); l = clamp(l, 0, 1);
+    var q = l < 0.5 ? l * (1 + s) : l + s - l * s;   /* C = (1-|2L-1|)·S */
+    var p = 2 * l - q;                                /* X = C·(1-|2t-1|) base */
+    function f(t) {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    }
+    return rgbToHex(f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255);
+  }
+
+  /** Deriva los estados semánticos desde bodyHex; `declared` tiene prioridad */
+  function deriveStates(bodyHex, declared) {
+    var c = hexToRgb(bodyHex);
+    var hsl = rgbToHsl(c[0], c[1], c[2]);
+    var H = hsl[0], S = hsl[1], L = hsl[2];
+    var out = {
+      base:  bodyHex,
+      dim:   hslToHex(H, S * 0.92, L - 0.10),
+      soft:  hslToHex(H, S * 0.95, L + 0.06),
+      blush: hslToHex(345, 0.40, clamp(L + 0.02, 0.55, 0.82)),
+      angry: hslToHex(8, 0.70, clamp(L - 0.02, 0.48, 0.66)),
+      alert: '#E25B5B',
+      off:   hslToHex(H, S * 0.35, L - 0.02)
+    };
+    Object.assign(out, declared || {});
+    return out;
+  }
+
   /* ---------------- Centro de registros de personajes ---------------- */
 
   var characters = new Map();
@@ -115,10 +166,16 @@
       }
     }
     var palette = Object.assign({ eye: '#233038', eyeHighlight: '#FFFFFF' }, raw.palette || {});
-    palette.states = Object.assign({}, raw.palette && raw.palette.states);
-    STATE_KEYS.forEach(function (k) {
-      if (!palette.states[k]) palette.states[k] = palette.body;
-    });
+    /* Auto-palette: los 7 estados semánticos se derivan de palette.body por armónicos HSL;
+     * lo declarado en palette.states (o blush/zzz sueltos) siempre manda sobre el derivado */
+    var declared = Object.assign({}, raw.palette && raw.palette.states);
+    if (!declared.blush && palette.blush) declared.blush = palette.blush;
+    palette.states = deriveStates(palette.body, declared);
+    if (!palette.zzz) {
+      var zc = hexToRgb(palette.states.dim);
+      var zh = rgbToHsl(zc[0], zc[1], zc[2]);
+      palette.zzz = hslToHex(zh[0], zh[1] * 0.8, zh[2] + 0.10);
+    }
 
     var resolved = {
       id: raw.id,
@@ -143,19 +200,63 @@
     return resolved;
   }
 
-  /* Variante de contorno corporal: raw.variants = { idVariante: { name, en, body } }.
-   * La variante solo reemplaza el anillo corporal (silueta), la familia de ojos / paleta /
-   * la secuencia emocional se comparten todos */
+  /* Variante de personaje: raw.variants = { idVariante: { name, en, body?, palette?, eyeStyle?,
+   * features?, face?, fxSkin?, emotions? } }.
+   * v1.9: ya no es solo contorno corporal — fusiona paleta (con auto-palette), ojos, rasgos,
+   * posición facial, skin de efectos y parches de emoción sobre el personaje base. */
+
+  function deepMergeObj(a, b) {
+    var out = Object.assign({}, a);
+    for (var k in b) {
+      var av = out[k], bv = b[k];
+      if (bv && typeof bv === 'object' && !Array.isArray(bv) &&
+          av && typeof av === 'object' && !Array.isArray(av)) {
+        out[k] = deepMergeObj(av, bv);
+      } else {
+        out[k] = bv;
+      }
+    }
+    return out;
+  }
+
   function resolveVariant(raw, vid) {
     var base = resolveCharacter(raw);
     if (!vid || !raw.variants || !raw.variants[vid]) return base;
     raw._variantCache = raw._variantCache || {};
     if (!raw._variantCache[vid]) {
       var v = raw.variants[vid];
-      raw._variantCache[vid] = Object.assign({}, base, {
-        variant: vid,
-        bodyRing: v.body ? GEO.buildBody(v.body) : base.bodyRing
-      });
+      var merged = Object.assign({}, base, { variant: vid });
+      if (v.body) merged.bodyRing = GEO.buildBody(v.body);
+      if (v.fxSkin) merged.fxSkin = v.fxSkin;
+      if (v.face) merged.face = Object.assign({}, base.face, v.face);
+      if (v.emotions) merged.emotions = deepMergeObj(base.emotions || {}, v.emotions);
+      if (v.palette) {
+        var pal = deepMergeObj(base.palette, v.palette);
+        var dec = Object.assign({}, v.palette.states || {});
+        if (!dec.blush && v.palette.blush) dec.blush = v.palette.blush;
+        pal.states = deriveStates(pal.body, dec);
+        if (!pal.zzz) {
+          var zc = hexToRgb(pal.states.dim);
+          var zh = rgbToHsl(zc[0], zc[1], zc[2]);
+          pal.zzz = hslToHex(zh[0], zh[1] * 0.8, zh[2] + 0.10);
+        }
+        merged.palette = pal;
+      }
+      if (v.eyeStyle) {
+        /* ojo con pupila: el degradado de iris se construye al crear la bola a partir de
+         * ch.eyeStyle.pupil, basta con reconstruir el objeto de estilo fusionado */
+        merged.eyeStyle = deepMergeObj(base.eyeStyle, v.eyeStyle);
+      }
+      if (v.features) {
+        merged.features = deepMergeObj(base.features, v.features);
+        if (v.features.mouth) {
+          var mouthShapes = Object.assign({}, base.mouthShapes);
+          var mw = { w: merged.features.mouth.w || 26 };
+          GEO.mouthSlots.forEach(function (slot) { mouthShapes[slot] = GEO.buildMouth(slot, mw); });
+          merged.mouthShapes = mouthShapes;
+        }
+      }
+      raw._variantCache[vid] = merged;
     }
     return raw._variantCache[vid];
   }
@@ -338,7 +439,7 @@
     }
   }
 
-  /* ---------------- Centro de registros de emociones (configuración original compartida por todos los personajes) ----------------
+  /* ---------------- Centro de registros de emociones (configuración original compartida por todos los personajes) ---------------- */
 
   var GROUPS = (window.EMOTION_GROUPS || [
     { key: 'life',    name: 'Ciclo de vida',     en: 'Lifecycle' },
@@ -349,7 +450,19 @@
 
   var registry = new Map();   /* id → raw */
   var order = [];
+  var enabledMap = {};        /* id → false solo para emociones deshabilitadas (setEnabled) */
   var configVersion = 0;
+
+  /* Perfiles de parpadeo por emoción (blinkProfile / blinkS del preset):
+   * los intervalos siguen viniendo de blinkMs; el perfil cambia la FORMA del parpadeo */
+  var BLINK_PROFILES = {
+    /* entrecierre parcial + ojeada lateral: pensando / evaluando */
+    thinking: { depth: 0.7, glance: true },
+    /* párpados pesados: caída lenta y recuperación perezosa (cansado / durmiente) */
+    heavy:    { depth: 1, close: 240, pause: 160, rise: 520, settle: 380 },
+    /* ráfagas cortas e irregulares: agitado / nervioso */
+    nervous:  { depth: 0.9, close: 90, pause: 40, rise: 160, burstChance: 0.5 }
+  };
 
   function knownGroup(g) {
     return GROUPS.some(function (x) { return x.key === g; });
@@ -381,6 +494,15 @@
     }
     if (raw.sequence != null && !Array.isArray(raw.sequence.frames)) {
       errs.push('sequence.frames 必须是数组');
+    }
+    if (raw.presets != null) {
+      if (!Array.isArray(raw.presets)) errs.push('presets 必须是 arreglo de nombres de preset');
+      else raw.presets.forEach(function (p, i) {
+        if (typeof p !== 'string') errs.push('presets[' + i + '] debe ser string');
+      });
+    }
+    if (raw.blinkProfile != null && !BLINK_PROFILES[raw.blinkProfile]) {
+      errs.push('blinkProfile desconocido: ' + raw.blinkProfile);
     }
     return errs;
   }
@@ -426,9 +548,13 @@
   }
 
    /** Normaliza una configuración de emoción para un personaje: fusión profunda de la pose base,
-    *  pregenera la secuencia con frames completos */
+    *  pregenera la secuencia con frames completos.
+   *  Presets: `presets: ['steady', …]` se expanden vía MM.config.preset() antes de normalizar.
+   *  Parpadeo por emoción: blinkProfile 'thinking' (entrecierre + ojeada), 'heavy' (caída lenta),
+   *  'nervous' (rafagas rápidas); sin perfil, parpadeo estándar con sobreimpulso al abrir. */
   function normalizeFor(raw, ch) {
     raw = mergeRaw(raw, ch.emotions && ch.emotions[raw.id]);
+    if (Array.isArray(raw.presets) && raw.presets.length) raw = applyPresets(raw);
     var base = resolvePoseColors(applySpec(defaultPose(), raw), ch);
     var pool = (raw.pool || ['calm', 'calm2']).filter(function (s) { return ch.eyeFamily[s]; });
     if (!pool.length) pool = ['calm'];
@@ -444,6 +570,7 @@
       blinkMs: raw.blinkMs !== undefined ? raw.blinkMs : [6000, 14000],
       openness: raw.openness != null ? raw.openness : 1,
       antics: !!raw.antics,
+      blinkProfile: BLINK_PROFILES[raw.blinkProfile] ? raw.blinkProfile : null,
       mouth: raw.mouth && ch.mouthShapes[raw.mouth] ? raw.mouth : 'flat',
       base: base,
       anims: (raw.anims || []).map(function (a) { return Object.assign({}, a); }),
@@ -459,11 +586,70 @@
     return def;
   }
 
+  /* ---------------- Presets nombrados (`presets: ['steady', …]`) ----------------
+   * Reducen la definición de emociones a lo esencial: un preset aporta ritmo de rotación,
+   * parpadeo, respiración y — si se declara `blinkS` — el perfil de parpadeo por emoción. */
+
+  var PRESETS = {
+    steady:  { poolMs: [9000, 16000], blinkMs: [6000, 14000], breathe: 0.010 },
+    calm:    { poolMs: [7000, 12000], blinkMs: [5000, 11000], breathe: 0.010 },
+    slow:    { poolMs: [12000, 20000], blinkMs: [8000, 16000], breathe: 0.006, blinkS: 'heavy' },
+    lively:  { poolMs: [2500, 4500], blinkMs: [2500, 5000], breathe: 0.014, antics: true },
+    jumpy:   { poolMs: [1400, 2600], blinkMs: [1600, 3500], breathe: 0.008, poolSpeed: 9 },
+    nervous: { poolMs: [900, 1800], blinkMs: [1200, 2600], breathe: 0.006, blinkS: 'nervous' },
+    focused: { poolMs: [1800, 3200], blinkMs: [2800, 5500], breathe: 0.004 },
+    sleepy:  { poolMs: [4000, 8000], blinkMs: null, breathe: 0.005, blinkS: 'heavy' },
+    thinking:{ poolMs: [2000, 3600], blinkMs: [3500, 7000], breathe: 0.010, blinkS: 'thinking' }
+  };
+
+  function applyPresets(raw) {
+    var out = Object.assign({}, raw);
+    var anims = (raw.anims || []).slice();
+    raw.presets.forEach(function (pname) {
+      var p = PRESETS[pname];
+      if (!p) { console.warn('[MoodMates] preset desconocido: ' + pname); return; }
+      if (out.poolMs == null && p.poolMs) out.poolMs = p.poolMs.slice();
+      if (raw.blinkMs === undefined && p.blinkMs !== undefined) out.blinkMs = p.blinkMs === null ? null : p.blinkMs.slice();
+      if (out.poolSpeed == null && p.poolSpeed) out.poolSpeed = p.poolSpeed;
+      if (out.antics == null && p.antics) out.antics = true;
+      if (out.blinkProfile == null && p.blinkS) out.blinkProfile = p.blinkS;
+      if (p.breathe && !(anims.length && anims[0].isBreathe)) {
+        anims.unshift({ target: '_breathe', prop: 'scale', type: 'sine', amp: p.breathe, period: 3600, isBreathe: true });
+      }
+    });
+    out.anims = anims.filter(function (a) { return !a.isBreathe; });
+    delete out.presets;
+    return out;
+  }
+
   MM.config = {
     register: register,
+    /** Registra / sobrescribe un preset nombrado utilizable en `presets: [...]` */
+    registerPreset: function (name, spec) {
+      if (!name || typeof name !== 'string' || !spec || typeof spec !== 'object') {
+        return { ok: false, errors: ['registerPreset requiere (nombre, objeto)'] };
+      }
+      PRESETS[name] = Object.assign({}, PRESETS[name] || {}, spec);
+      configVersion++;
+      return { ok: true, name: name };
+    },
+    preset: function (name) { return PRESETS[name] ? Object.assign({}, PRESETS[name]) : null; },
+    presets: function () { return Object.keys(PRESETS); },
     getRaw: function (id) { return registry.get(id) || null; },
+    isEnabled: function (id) { return enabledMap[id] !== false; },
+    /** Deshabilita una emoción sin borrarla: desaparece de list()/tours; setEmotion cae en respaldo */
+    setEnabled: function (id, on) {
+      if (!registry.has(id)) return { ok: false, id: id, errors: ['Emoción no registrada: ' + id] };
+      if (on === false) enabledMap[id] = false; else delete enabledMap[id];
+      configVersion++;
+      return { ok: true, id: id, enabled: on !== false };
+    },
+    enabledIds: function () {
+      return order.filter(function (id) { return enabledMap[id] !== false; });
+    },
     list: function (group) {
       return order.map(function (id) { return registry.get(id); })
+        .filter(function (d) { return enabledMap[d.id] !== false; })
         .filter(function (d) { return !group || d.group === group; });
     },
     groups: function () {
@@ -480,14 +666,37 @@
       } catch (e) {
         return { ok: false, added: 0, errors: ['Error al analizar JSON: ' + e.message] };
       }
-      var arr = Array.isArray(data) ? data : [data];
+      /* Formato emotions.json: array de emociones O objeto { presets, emotions } */
       var added = 0, errors = [];
+      var presets = null, arr;
+      if (Array.isArray(data)) arr = data;
+      else if (data && Array.isArray(data.emotions)) { arr = data.emotions; presets = data.presets || null; }
+      else arr = [data];
+      if (presets) {
+        Object.keys(presets).forEach(function (pn) {
+          MM.config.registerPreset(pn, presets[pn]);
+        });
+      }
       arr.forEach(function (raw) {
+        if (raw && raw.enabled === false) enabledMap[raw.id] = false;
         var r = register(raw);
         if (r.ok) added++;
         else errors.push('[' + ((raw && raw.id) || '?') + '] ' + r.errors.join('; '));
       });
       return { ok: errors.length === 0, added: added, errors: errors };
+    },
+    /** Carga el catálogo externo data/emotions.json (nunca rechaza):
+     *  Promise<{ ok, added, errors }> — ante red/parse/validación inválida devuelve errores
+     *  y el motor sigue funcionando con el seed embebido. */
+    loadFromUrl: function (url) {
+      return fetch(url)
+        .then(function (res) {
+          if (!res.ok) return { ok: false, added: 0, errors: ['HTTP ' + res.status + ' al cargar ' + url] };
+          return res.text().then(function (txt) { return MM.config.importConfig(txt); });
+        })
+        .catch(function (e) {
+          return { ok: false, added: 0, errors: ['No se pudo cargar ' + url + ': ' + e.message] };
+        });
     }
   };
 
@@ -520,7 +729,7 @@
     if (!ch) throw new Error('MoodMates.create: no se ha registrado ningún personaje (cargue primero src/characters/*.js)');
     this.character = ch;
 
-    this.ball = MM.createBall(el, Object.assign({}, opts, {
+    this.ball = window.createBall(el, Object.assign({}, opts, {
       character: ch,
       lite: opts.lite != null ? opts.lite : opts.autostart === false
     }));
@@ -535,11 +744,18 @@
     this._lastTick = 0;
     this._spin = null;
 
+    /* ---- opciones de animación (documentadas en docs/INTEGRATION.md) ---- */
+    /* layered: transiciones en capas rubor → cejas → ojos → boca (desfase por grupo de rasgos);
+       saccades: mirada sacádica (saltos + pausa); false = seguimiento suavizado exponencial */
+    this._layered = opts.layered !== false;
+    this._saccades = opts.saccades !== false;
+    this._sac = { x: 0, y: 0, next: 0 };
+
     /* ---- caché de definiciones de emoción normalizadas para este personaje ---- */
     this._defs = new Map();
     this._defsVersion = -1;
 
-    /* ---- sistema de deformación del anillo ocular (impulsado por ranuras) ----
+    /* ---- sistema de deformación del anillo ocular (impulsado por ranuras) ---- */
     var calm = ch.eyeFamily.calm;
     this._ringSrc = [calm[0], calm[1]];
     this._ringDst = [calm[0], calm[1]];
@@ -658,8 +874,21 @@
 
       this._poolPos = 0;
       this._mouthHoldUntil = 0;
-      this._setExpr(def.pool[0], def.poolSpeed >= 10 ? 10 : 8);
-      this._setMouth(def.mouth, 8);
+      /* Transiciones en capas (layered): la pose base / rubor viaja con el lerp global,
+       * pero ojos y boca entran desfasados (~80 ms de retraso entre grupos) para que el
+       * cambio se lea como un gesto natural escalonado, no como un corte sincronizado */
+      if (this._layered && prevId !== null && prevId !== def.id && !def.sequence) {
+        var self = this;
+        setTimeout(function () {
+          if (self._def === def) self._setExpr(def.pool[0], def.poolSpeed >= 10 ? 10 : 8);
+        }, 70);
+        setTimeout(function () {
+          if (self._def === def) self._setMouth(def.mouth, 8);
+        }, 150);
+      } else {
+        this._setExpr(def.pool[0], def.poolSpeed >= 10 ? 10 : 8);
+        this._setMouth(def.mouth, 8);
+      }
       this._poolNext = now + rand(def.poolMs[0], def.poolMs[1]);
       if (prevId !== null && prevId !== def.id && def.blinkMs) this._blinkNow(now);
       this._blinkNext = def.blinkMs ? now + rand(def.blinkMs[0], def.blinkMs[1]) : Infinity;
@@ -706,7 +935,9 @@
     /* ---------- recorrido automático ---------- */
     startTour: function (ids, interval) {
       this.stopTour();
-      if (!ids || !ids.length) return;
+      if (ids) ids = ids.filter(function (id) { return MM.config.isEnabled(id); });
+      if (!ids || !ids.length) ids = MM.config.enabledIds();
+      if (!ids.length) return;
       interval = interval || 2500;
       this._touring = true;
       var self = this, i = 0;
@@ -860,14 +1091,46 @@
       this._mouthSlot = slot;
     },
 
-    /* Fotogramas clave de parpadeo: cerrar → pausa 70ms → abrir a 1.08 (sobrepaso) → 300ms volver a 1 */
+    /* Parpadeo: estándar = cerrar → pausa 70ms → abrir a 1.08 (sobrepaso) → 300ms volver a 1.
+     * Con blinkProfile activo cambia la FORMA del parpadeo según la emoción:
+     *   thinking → entrecierre parcial + micro-ojeada lateral durante el cierre
+     *   heavy    → párpados pesados: caída lenta, pausa larga, recuperación perezosa
+     *   nervous  → ráfagas cortas e irregulares */
     _blinkNow: function (t) {
+      var pr = (this._def && this._def.blinkProfile) ? BLINK_PROFILES[this._def.blinkProfile] : null;
+      if (!pr) {
+        this._blinkQ.push(
+          { at: t, v: 0.05 }, { at: t + 70, v: 0.05 },
+          { at: t + 150, v: 1.08 }, { at: t + 300, v: 1 }
+        );
+        if (Math.random() < 0.14) {
+          this._blinkQ.push({ at: t + 370, v: 0.05 }, { at: t + 480, v: 1 });
+        }
+        return;
+      }
+      var d = pr.depth == null ? 1 : pr.depth;
+      var vC = 0.05 + (1 - d) * 0.9;               /* profundidad de cierre (entrecierre si d<1) */
+      var close = pr.close || 120, pause = pr.pause || 70, rise = pr.rise || 150;
       this._blinkQ.push(
-        { at: t, v: 0.05 }, { at: t + 70, v: 0.05 },
-        { at: t + 150, v: 1.08 }, { at: t + 300, v: 1 }
+        { at: t, v: vC }, { at: t + close, v: vC },
+        { at: t + close + pause, v: 1.06 }, { at: t + close + pause + rise, v: 1 }
       );
-      if (Math.random() < 0.14) {
-        this._blinkQ.push({ at: t + 370, v: 0.05 }, { at: t + 480, v: 1 });
+      if (pr.glance) {
+        /* pensando: ojeada lateral mientras el párpado está entornado */
+        this._gaze.tx += rand(-6, 6);
+      }
+      if (pr.settle) {
+        /* heavy: segunda caída perezosa antes de asentarse del todo */
+        var s2 = t + close + pause + rise;
+        this._blinkQ.push(
+          { at: s2 + pr.settle * 0.4, v: vC + (1 - vC) * 0.45 },
+          { at: s2 + pr.settle, v: 1 }
+        );
+      }
+      if (pr.burstChance && Math.random() < pr.burstChance) {
+        /* nervous: refugio de ráfaga tras el primer parpadeo */
+        var b2 = t + close + pause + rise + 90;
+        this._blinkQ.push({ at: b2, v: vC }, { at: b2 + 80, v: 1 });
       }
     },
 
@@ -1048,12 +1311,32 @@
       }
       pose.face.mouthRing = this._mouthCur;
 
-      /* mirada del ratón: suavizado exponencial independiente de la tasa de fotogramas */
-      var k = 1 - Math.exp(-5.66 * dt);
+      /* Mirada: con saccades activos el ojo salta a micro-destinos (transición casi
+       * instantánea + sobreimpulso ~4% + fijación), imitando el movimiento sacádico real;
+       * sin ellos, suavizado exponencial independiente de la tasa de fotogramas */
       var gx = def.gaze !== false ? this._gaze.tx : 0;
       var gy = def.gaze !== false ? this._gaze.ty : 0;
-      this._gaze.x += (gx - this._gaze.x) * k;
-      this._gaze.y += (gy - this._gaze.y) * k;
+      if (this._saccades && this._active && def.gaze !== false) {
+        if (now >= this._sac.next) {
+          var baseX = gx || 0, baseY = gy || 0;
+          this._sac.x = baseX + rand(-7, 7);
+          this._sac.y = baseY + rand(-4, 4);
+          this._sac.next = now + rand(260, 900);
+          this._sac.over = 1;                      /* flag de fase de sobreimpulso */
+        }
+        var ks = 1 - Math.exp(-26 * dt);           /* muy rápido ≈ salto sacádico */
+        this._gaze.x += (this._sac.x - this._gaze.x) * ks;
+        this._gaze.y += (this._sac.y - this._gaze.y) * ks;
+        if (this._sac.over && Math.abs(this._sac.x - this._gaze.x) < 0.6) {
+          this._gaze.x += (this._sac.x - gx > 0 ? 1 : -1) * 0.9;   /* micro-overshoot ~4% */
+          this._sac.over = 0;
+        }
+      } else {
+        var k = 1 - Math.exp(-5.66 * dt);
+        this._sac.x = gx; this._sac.y = gy;
+        this._gaze.x += (gx - this._gaze.x) * k;
+        this._gaze.y += (gy - this._gaze.y) * k;
+      }
       pose.left.lookX += this._gaze.x;
       pose.right.lookX += this._gaze.x;
       pose.left.lookY += this._gaze.y;
