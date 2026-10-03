@@ -1,3 +1,4 @@
+// rostro_animado/site/i18n.js
 /* ============================================================
  * i18n.js —— Diccionario de textos de interfaz (datos puros + función de obtención)
  *   MM_I18N.t(key, params)  Obtiene el texto en el idioma actual, interpola con marcador {x}
@@ -40,7 +41,7 @@ window.MM_I18N = (function () {
       drawerClose: 'Cerrar ajustes',
       secAppearance: 'Apariencia',
       lblCharacter: 'Personaje actual',
-      lblVariant: 'Contorno del cuerpo',
+      lblVariant: 'Variante',
       variantDefault: 'Predeterminado',
       lblSketch: 'Modo boceto',
       secDemo: 'Demostración',
@@ -62,7 +63,7 @@ window.MM_I18N = (function () {
       toastSketchOn: 'Cambiado a modo boceto (solo contornos)',
       toastSketchOff: 'Vuelta al relleno sólido',
       toastCharacter: 'Cambiado a {name}',
-      toastVariant: 'Contorno del cuerpo cambiado: {name}',
+      toastVariant: 'Variante cambiada: {name}',
       toastAiSent: 'Mensaje AI enviado',
       toastExported: 'Exportadas {n} configuraciones de emoción',
       toastImportOk: 'Importadas {n} configuraciones de emoción',
@@ -102,7 +103,7 @@ window.MM_I18N = (function () {
       drawerClose: 'Close settings',
       secAppearance: 'Appearance',
       lblCharacter: 'Character',
-      lblVariant: 'Body outline',
+      lblVariant: 'Variant',
       variantDefault: 'Default',
       lblSketch: 'Sketch mode',
       secDemo: 'Showcase',
@@ -124,7 +125,7 @@ window.MM_I18N = (function () {
       toastSketchOn: 'Sketch mode on (outline only)',
       toastSketchOff: 'Back to solid fill',
       toastCharacter: 'Switched to {name}',
-      toastVariant: 'Body outline switched: {name}',
+      toastVariant: 'Variant switched: {name}',
       toastAiSent: 'AI message dispatched',
       toastExported: 'Exported {n} emotion configs',
       toastImportOk: 'Imported {n} emotion configs',
