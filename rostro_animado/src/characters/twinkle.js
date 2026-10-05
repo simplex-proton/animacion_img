@@ -51,7 +51,7 @@ window.MoodMates.characters.register({
   },
 
   features: {
-    mouth: { w: 24, dy: 34 },
+    mouth: { w: 36, dy: 34 },
     blush: { dx: 40, dy: 24, rx: 10, ry: 6, max: 0.85 },
     /* Sin cejas: ojo con pupilas + gafas ya aportan suficiente información;
      * la emoción se expresa mediante apertura de párpados / mirada / forma de la boca */

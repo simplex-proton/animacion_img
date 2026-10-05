@@ -308,7 +308,8 @@
     zzz: 0,      /* partículas de letras durante el sueño (0~1) */
     orbit: 0     /* partículas en órbita constante (0~1) */
   };
-  var DEFAULT_EYE = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotate: 0, open: 1, color: '@eye', lookX: 0, lookY: 0 };
+  /* v2.0: pupil = dilatación (1 normal), wet = humedad emocional 0~1 */
+  var DEFAULT_EYE = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotate: 0, open: 1, color: '@eye', lookX: 0, lookY: 0, pupil: 1, wet: 0 };
   var DEFAULT_FACE = {
     blush: 0, browVis: 0, browTilt: 0, browRaise: 0,
     mouthX: 0, mouthY: 0, mouthSX: 1, mouthSY: 1
@@ -729,7 +730,8 @@
     if (!ch) throw new Error('MoodMates.create: no se ha registrado ningún personaje (cargue primero src/characters/*.js)');
     this.character = ch;
 
-    this.ball = window.createBall(el, Object.assign({}, opts, {
+    /* FIX v1.9: MM.createBall se exporta en MoodMates (render.js), no en window global */
+    this.ball = MM.createBall(el, Object.assign({}, opts, {
       character: ch,
       lite: opts.lite != null ? opts.lite : opts.autostart === false
     }));
@@ -1097,8 +1099,12 @@
      *   heavy    → párpados pesados: caída lenta, pausa larga, recuperación perezosa
      *   nervous  → ráfagas cortas e irregulares */
     _blinkNow: function (t) {
+      /* v2.0 anticipación: 40ms de leve apertura (1.06) antes de cerrar — señal de vida */
+      this._blinkQ.push({ at: t - 40, v: 1.06 });
       var pr = (this._def && this._def.blinkProfile) ? BLINK_PROFILES[this._def.blinkProfile] : null;
       if (!pr) {
+        /* v2.0 parpadeo asimétrico: el ojo derecho entra 20-40ms tarde (se aplica en render vía eye.k) */
+        this._asym = rand(20, 40);
         this._blinkQ.push(
           { at: t, v: 0.05 }, { at: t + 70, v: 0.05 },
           { at: t + 150, v: 1.08 }, { at: t + 300, v: 1 }
@@ -1111,6 +1117,7 @@
       var d = pr.depth == null ? 1 : pr.depth;
       var vC = 0.05 + (1 - d) * 0.9;               /* profundidad de cierre (entrecierre si d<1) */
       var close = pr.close || 120, pause = pr.pause || 70, rise = pr.rise || 150;
+      this._asym = rand(20, 40);
       this._blinkQ.push(
         { at: t, v: vC }, { at: t + close, v: vC },
         { at: t + close + pause, v: 1.06 }, { at: t + close + pause + rise, v: 1 }
@@ -1317,12 +1324,18 @@
       var gx = def.gaze !== false ? this._gaze.tx : 0;
       var gy = def.gaze !== false ? this._gaze.ty : 0;
       if (this._saccades && this._active && def.gaze !== false) {
+        var prevSacX = this._sac.x, prevSacY = this._sac.y;
         if (now >= this._sac.next) {
           var baseX = gx || 0, baseY = gy || 0;
           this._sac.x = baseX + rand(-7, 7);
           this._sac.y = baseY + rand(-4, 4);
           this._sac.next = now + rand(260, 900);
           this._sac.over = 1;                      /* flag de fase de sobreimpulso */
+          /* v2.0: parpadeo acoplado a saccadas — tras un salto >8px, 60% de probabilidad */
+          if (def.blinkMs && Math.hypot(this._sac.x - prevSacX, this._sac.y - prevSacY) > 8 &&
+              Math.random() < 0.6 && !this._blinkQ.length) {
+            this._blinkNow(now + 60);
+          }
         }
         var ks = 1 - Math.exp(-26 * dt);           /* muy rápido ≈ salto sacádico */
         this._gaze.x += (this._sac.x - this._gaze.x) * ks;
@@ -1376,6 +1389,29 @@
       var openS = clamp(this._open.x, 0.02, 1.5);
       pose.left.open = clamp(pose.left.open, 0, 1.3) * openS;
       pose.right.open = clamp(pose.right.open, 0, 1.3) * openS;
+
+      /* ---- v2.0: micro-vida ocular ---- */
+      /* parpadeo asimétrico: el ojo derecho entra 20-40ms tarde (desfasa la curva de apertura) */
+      if (this._asym && openS < 0.97) {
+        pose.right.open = clamp(pose.right.open + (1 - openS) * 0.55, 0.02, 1.5);
+      }
+      /* convergencia: miradas cercanales mueven cada ojo ±1.5px hacia el centro */
+      var conv = clamp(1.5 - Math.abs(this._gaze.x) / 16, 0, 1) * 1.5;
+      pose.left.lookX += conv;
+      pose.right.lookX -= conv;
+      /* acoplamiento párpado-mirada: mirar abajo baja el párpado ~30% del lookY (señal de vida barata) */
+      var lidDip = clamp(-this._gaze.y * 0.012, 0, 0.25);
+      if (lidDip > 0.01) {
+        pose.left.open = clamp(pose.left.open - lidDip, 0.02, 1.5);
+        pose.right.open = clamp(pose.right.open - lidDip, 0.02, 1.5);
+      }
+      /* follow-through: los ojos llegan tarde al movimiento vertical del cuerpo */
+      if (this._eyeFt == null) this._eyeFt = spring(0);
+      this._eyeFt.t = -(pose.body.y || 0) * 0.18;
+      var ftSteps = Math.max(1, Math.ceil((this._dt || 1 / 60) / (1 / 120)));
+      for (var fts = 0; fts < ftSteps; fts++) springStep(this._eyeFt, 14, 0.6, (this._dt || 1 / 60) / ftSteps);
+      pose.left.y += this._eyeFt.x;
+      pose.right.y += this._eyeFt.x;
       pose.left.scaleX = Math.max(pose.left.scaleX, 0.05);
       pose.left.scaleY = Math.max(pose.left.scaleY, 0.05);
       pose.right.scaleX = Math.max(pose.right.scaleX, 0.05);

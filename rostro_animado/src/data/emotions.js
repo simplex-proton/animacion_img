@@ -200,7 +200,8 @@ window.EMOTION_SEED = [
     pool: ['sad', 'sleepy', 'closed2'], poolMs: [4000, 7000], blinkMs: [4000, 8000],
     mouth: 'frown',
     body: { y: 5, rotate: -4, breathe: 0.007, color: '@dim' },
-    eyes: { both: { y: 8, scaleX: 0.88, scaleY: 0.88, lookY: 4 } },
+    /* v2.0: pupila ligeramente dilatada + brillo húmedo en la tristeza */
+    eyes: { both: { y: 8, scaleX: 0.88, scaleY: 0.88, lookY: 4, pupil: 1.15, wet: 0.35 } },
     face: { browVis: 1, browTilt: 10, browRaise: 2 },
     anims: [
       { target: 'eyes', prop: 'y', type: 'sine', amp: 1.6, period: 3600 }
@@ -214,7 +215,8 @@ window.EMOTION_SEED = [
     pool: ['wide', 'wide2'], poolMs: [2500, 4000], blinkMs: [1800, 3500],
     mouth: 'open',
     body: { y: -4, scale: 1.03, breathe: 0.006 },
-    eyes: { both: { scaleX: 1.14, scaleY: 1.14, y: -2, lookY: -2 } },
+    /* v2.0: dilatación pupilar de la sorpresa (1.35) */
+    eyes: { both: { scaleX: 1.14, scaleY: 1.14, y: -2, lookY: -2, pupil: 1.35 } },
     face: { browVis: 1, browRaise: 7 },
     sequence: {
       settle: 'base',
@@ -234,7 +236,8 @@ window.EMOTION_SEED = [
     mouth: 'pout',
     /* base = estado final de la secuencia, garantiza que la miniatura estática coincida con el aspecto final */
     body: { rotate: 6, breathe: 0.012, color: '@blush' },
-    eyes: { both: { y: 4, lookX: 8, lookY: 3 } },
+    /* v2.0: brillo húmedo de la timidez */
+    eyes: { both: { y: 4, lookX: 8, lookY: 3, wet: 0.5 } },
     face: { blush: 1 },
     anims: [
       { target: 'eyes', prop: 'lookX', type: 'sine', amp: 2, period: 2600 }
@@ -341,6 +344,8 @@ window.EMOTION_SEED = [
     mouth: 'frown',
     /* base = estado final de la secuencia, tono rojo */
     body: { y: 1, breathe: 0.004, color: '@angry' },
+    /* v2.0: pupila contraída (0.78) con cejas fruncidas — mirada clavada */
+    eyes: { both: { pupil: 0.78 } },
     face: { browVis: 1, browTilt: -14, browRaise: -2 },
     anims: [
       { target: 'body', prop: 'x', type: 'jitter', amp: 1.1, speed: 7 }
@@ -408,7 +413,8 @@ window.EMOTION_SEED = [
     pool: ['happy', 'happy2', 'calm'], poolMs: [1400, 2600], blinkMs: [2200, 4500],
     mouth: 'grin',
     body: { spinFx: 1, confetti: 0.95 },
-    eyes: { both: { y: -3 } },
+    /* v2.0: destello húmedo de emoción al completar */
+    eyes: { both: { y: -3, wet: 0.4 } },
     sequence: {
       settle: 'base',
       frames: [

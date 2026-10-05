@@ -202,37 +202,53 @@
     * Los huecos incluyen formas labiales cerradas y bocas abiertas, la topología compartida puede deformarse libremente */
    var MOUTH_N = 24;
 
+   /* v2.0: skew y cornerL/cornerR introducen asimetría facial (offset lineal sobre la línea media).
+      Es opcional: las formas clásicas siguen siendo simétricas. */
    function mouthLens(o) {
       var w = o.w, h = o.h;
       var bend = (o.bend || 0) * Math.max(h, 4);
       var taper = o.taper != null ? o.taper : 0.8;
+      var skew = o.skew || 0;                 /* desplazamiento lateral proporcional a u */
+      var cL = o.cornerL || 0, cR = o.cornerR || 0;  /* levantado vertical de cada comisura */
       /* misma parametrización de curva cerrada que lens: los extremos se unen en un solo punto +
        * muestreo denso en los extremos, los labros de la boca son lisos y uniformes */
       var ring = [];
       for (var k = 0; k < MOUTH_N; k++) {
          var phi = TAU * k / MOUTH_N;
          var u = (1 - Math.cos(phi)) / 2;
-         var x = (u - 0.5) * w;
+         var x = (u - 0.5) * w + skew * (u - 0.5) * w;
          var arch = Math.sin(Math.PI * u);
-         var mid = -bend * arch;
+         var corners = lerpCorner(cL, cR, u); /* interpolación lineal entre comisuras */
+         var mid = -bend * arch + corners;
          var th = (h / 2) * Math.pow(arch, taper);
          var y = Math.sin(phi) >= 0 ? mid - th : mid + th;
          ring.push([r2(x), r2(y)]);
       }
       return ring;
    }
+   function lerpCorner(a, b, u) { return a + (b - a) * u; }
 
-   /* base: { w } — ancho base de la boca del personaje; la altura / curvatura de cada hueco son constantes semánticas */
+   /* base: { w } — ancho base de la boca del personaje; la altura / curvatura de cada hueco son constantes semánticas.
+      v2.0: bocas más grandes y con nuevos huecos expresivos (la geometría sigue siendo el mismo anillo
+      de 24 puntos, por lo que todas las formas existentes deforman igual de bien). */
    var MOUTH_SLOTS = {
-      smile:  function (b) { return mouthLens({ w: b.w, h: 3.2, bend: -0.9, taper: 0.9 }); },
-      grin:   function (b) { return mouthLens({ w: b.w * 1.25, h: 11, bend: -0.55, taper: 0.6 }); },
-      o:      function (b) { return mouthLens({ w: b.w * 0.5, h: b.w * 0.52, bend: 0, taper: 0.4 }); },
+      smile:  function (b) { return mouthLens({ w: b.w, h: 3.4, bend: -0.9, taper: 0.9 }); },
+      grin:   function (b) { return mouthLens({ w: b.w * 1.25, h: 17, bend: -0.55, taper: 0.6 }); },
+      o:      function (b) { return mouthLens({ w: b.w * 0.5, h: b.w * 0.62, bend: 0, taper: 0.4 }); },
       flat:   function (b) { return mouthLens({ w: b.w * 0.8, h: 2.6, bend: 0, taper: 0.9 }); },
       frown:  function (b) { return mouthLens({ w: b.w * 0.85, h: 3, bend: 0.85, taper: 0.9 }); },
       wavy:   function (b) { return mouthLens({ w: b.w, h: 3, bend: -0.15, taper: 0.5 }); },
       pout:   function (b) { return mouthLens({ w: b.w * 0.42, h: 3.4, bend: 0.5, taper: 0.5 }); },
-      open:   function (b) { return mouthLens({ w: b.w * 0.72, h: b.w * 0.5, bend: -0.25, taper: 0.45 }); },
-      dot:    function (b) { return mouthLens({ w: b.w * 0.2, h: b.w * 0.18, bend: 0, taper: 0.4 }); }
+      open:   function (b) { return mouthLens({ w: b.w * 0.72, h: b.w * 0.72, bend: -0.25, taper: 0.45 }); },
+      dot:    function (b) { return mouthLens({ w: b.w * 0.2, h: b.w * 0.18, bend: 0, taper: 0.4 }); },
+      /* ---- v2.0: huecos nuevos ---- */
+      laugh:  function (b) { return mouthLens({ w: b.w * 1.15, h: b.w * 0.8, bend: -0.7, taper: 0.42 }); },
+      shout:  function (b) { return mouthLens({ w: b.w * 0.9, h: b.w * 0.95, bend: -0.1, taper: 0.38 }); },
+      smirk:  function (b) { return mouthLens({ w: b.w * 0.85, h: 3.2, bend: -0.55, taper: 0.85, cornerL: -1.2, cornerR: 2.6, skew: 0.08 }); },
+      sob:    function (b) { return mouthLens({ w: b.w * 0.6, h: b.w * 0.42, bend: 0.75, taper: 0.5, cornerL: 1.6, cornerR: -1.2 }); },
+      yawn:   function (b) { return mouthLens({ w: b.w * 0.62, h: b.w * 0.9, bend: -0.05, taper: 0.35 }); },
+      kiss:   function (b) { return mouthLens({ w: b.w * 0.34, h: b.w * 0.3, bend: 0.15, taper: 0.3 }); },
+      tongue: function (b) { return mouthLens({ w: b.w * 0.8, h: b.w * 0.55, bend: -0.3, taper: 0.45 }); }
    };
 
    function buildMouth(slotName, base) {
