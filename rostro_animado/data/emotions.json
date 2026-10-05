@@ -1,7 +1,4 @@
---- rostro_animado/data/emotions.json (原始)
 
-
-+++ rostro_animado/data/emotions.json (修改后)
 {
   "$schema": "./emotions.schema.json",
   "version": "2026-10-03",

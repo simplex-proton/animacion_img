@@ -1,3 +1,4 @@
+//+++ rostro_animado/src/core/render.js
 /* ============================================================
  * render.js — Capa de renderizado (solo renderizado, sin lógica de negocio)
  *
@@ -36,6 +37,7 @@
    var uid = 0;
 
    var C = 120;   /* consistente con geometry.js */
+   var TAU = Math.PI * 2;
 
    function el(tag, attrs) {
       var node = document.createElementNS(SVGNS, tag);
@@ -331,12 +333,32 @@
          var inner = el('g', { 'clip-path': 'url(#' + clipId + ')' });
          eye.inner = inner;
 
-         /* esclerófita (se escala sincronizada con la apertura de la párpida) */
+         /* ---- v2.0: esclerótica esférica con gradiente radial desplazado a la luz ---- */
+         var scleraId = id + 'sc' + k;
+         var sg = el('radialGradient', { id: scleraId, cx: '38%', cy: '34%', r: '75%' });
+         sg.appendChild(el('stop', { offset: '0%', 'stop-color': '#FFFFFF' }));
+         sg.appendChild(el('stop', { offset: '60%', 'stop-color': '#EEF1F8' }));
+         sg.appendChild(el('stop', { offset: '100%', 'stop-color': '#C9D0E2' }));
+         defs.appendChild(sg);
          eye.socket = el('path', {
             d: ringPath(ring0),
-            fill: pupilCfg.socket || '#FFFFFF'
+            fill: pupilCfg.socket || ('url(#' + scleraId + ')')
          });
          inner.appendChild(eye.socket);
+
+         /* ---- v2.0: sombra del párpado superior (linearGradient vertical, escala con `open`) ---- */
+         var lidShadowId = id + 'ls' + k;
+         var lg = el('linearGradient', { id: lidShadowId, x1: '0', y1: '0', x2: '0', y2: '1' });
+         lg.appendChild(el('stop', { offset: '0%', 'stop-color': '#000000', 'stop-opacity': '0.28' }));
+         lg.appendChild(el('stop', { offset: '35%', 'stop-color': '#000000', 'stop-opacity': '0' }));
+         lg.appendChild(el('stop', { offset: '100%', 'stop-color': '#000000', 'stop-opacity': '0' }));
+         defs.appendChild(lg);
+         var bb0 = eye.defBBox;
+         eye.lidShadow = el('rect', {
+            x: bb0.x, y: bb0.y, width: bb0.w, height: bb0.h,
+            fill: 'url(#' + lidShadowId + ')', opacity: 0.55, 'pointer-events': 'none'
+         });
+         inner.appendChild(eye.lidShadow);
 
          /* iris + pupila (círculos perfectos, no se aplastan con la párpida, recortados al cerrar) */
          var irisR = pupilCfg.irisR || EYE_HALF * 0.86;
@@ -344,8 +366,41 @@
          eye.irisR = irisR;
          eye.pupilR = pupilR;
          eye.iris = el('circle', { r: irisR, fill: 'url(#' + id + 'ir)' });
-         eye.pupil = el('circle', { r: pupilR, fill: pupilCfg.pupilColor || shade(pupilCfg.irisColor || palette.eye, -0.72) });
          inner.appendChild(eye.iris);
+
+         /* ---- v2.0: fibras radiales del iris (24 líneas finas, opacidad sutil) ---- */
+         var fibG = el('g', { opacity: 0.13, stroke: shade(pupilCfg.irisColor || palette.eye, -0.45), 'stroke-width': 0.7, 'pointer-events': 'none' });
+         for (var fi = 0; fi < 24; fi++) {
+            var fa = TAU * fi / 24 + (k ? 0.13 : 0);
+            fibG.appendChild(el('line', {
+               x1: Math.cos(fa) * irisR * 0.35, y1: Math.sin(fa) * irisR * 0.35,
+               x2: Math.cos(fa) * irisR * 0.92, y2: Math.sin(fa) * irisR * 0.92
+            }));
+         }
+         eye.fibers = fibG;
+         inner.appendChild(fibG);
+
+         /* anillo límbico: borde oscuro fino del iris */
+         eye.limb = el('circle', { r: irisR, fill: 'none', stroke: shade(pupilCfg.irisColor || palette.eye, -0.6), 'stroke-width': 1.4, opacity: 0.8 });
+         inner.appendChild(eye.limb);
+
+         /* cáustica inferior: arco claro opuesto a la luz */
+         eye.caustic = el('path', {
+            d: 'M ' + (-irisR * 0.62) + ' ' + (irisR * 0.42) + ' A ' + (irisR * 0.72) + ' ' + (irisR * 0.72) + ' 0 0 0 ' + (irisR * 0.62) + ' ' + (irisR * 0.42),
+            fill: 'none', stroke: '#FFFFFF', 'stroke-width': 1.1, opacity: 0.22, 'pointer-events': 'none'
+         });
+         inner.appendChild(eye.caustic);
+
+         /* ---- v2.0: menisco lagrimal (brillo húmedo en el borde inferior) ---- */
+         eye.tearline = el('path', {
+            d: ringPath(ring0), fill: 'none', stroke: '#FFFFFF', 'stroke-width': 1.2,
+            opacity: 0.18, 'pointer-events': 'none',
+            'stroke-dasharray': (bb0.w * 1.6) + ' ' + (bb0.w * 3.2),
+            'stroke-dashoffset': -(bb0.w * 0.7)
+         });
+         inner.appendChild(eye.tearline);
+
+         eye.pupil = el('circle', { r: pupilR, fill: pupilCfg.pupilColor || shade(pupilCfg.irisColor || palette.eye, -0.72) });
          inner.appendChild(eye.pupil);
 
          /* Punto de luz fijo: principal + secundario, no se mueve con el movimiento del ojo
@@ -580,12 +635,15 @@
          /* En modo ojo pequeño, la pupila se escala según la apertura (mínimo 0.6×),
             manteniendo la coherencia visual de la pupila en todas las emociones */
          var pupilScl = lash ? 1 : clamp(effOpen / IRIS_SMALL, 0.6, 1);
-         var pupilRNow = eye.pupilR * pupilScl;
+         /* v2.0: `pupil` en la pose (dilatación emocional) + hippus ±3% a ~3 Hz */
+         var pDil = (pose.pupil != null ? pose.pupil : 1) *
+                    (1 + 0.03 * Math.sin(performance.now() / 1000 * TAU * 3 + eye.k * 1.7));
+         var pupilRNow = eye.pupilR * pupilScl * clamp(pDil, 0.5, 1.6);
          if (pupilRNow !== eye.lastPupilR) {
             eye.pupil.setAttribute('r', r2(pupilRNow));
             eye.lastPupilR = pupilRNow;
          }
-         var socketFill = lash ? pose.color : (pupilCfg.socket || '#FFFFFF');
+         var socketFill = lash ? pose.color : (pupilCfg.socket || 'url(#' + id + 'sc' + k + ')');
          if (socketFill !== eye.lastSocketFill) {
             eye.socket.setAttribute('fill', socketFill);
             eye.lastSocketFill = socketFill;
@@ -603,6 +661,17 @@
                eye.socket.removeAttribute('transform');
             }
             eye.lastLidTf = lidTf;
+         }
+
+         /* ---- v2.0: sombra del párpado y húmedo reactivos a la apertura ---- */
+         if (eye.lidShadow) {
+            var shOp = clamp((1.25 - open) * 0.55, 0.12, 0.85);   /* crece al entrecerrar */
+            if (shOp !== eye.lastShOp) { eye.lidShadow.setAttribute('opacity', r2(shOp)); eye.lastShOp = shOp; }
+         }
+         if (eye.tearline) {
+            var tlOp = clamp(0.14 + (pose.wet || 0) * 0.46, 0, 0.6);
+            if (pose.wet > 0.05) tlOp += 0.08 * Math.sin(performance.now() / 1000 * TAU * 0.8); /* shimmer */
+            if (tlOp !== eye.lastTlOp) { eye.tearline.setAttribute('opacity', r2(tlOp)); eye.lastTlOp = tlOp; }
          }
 
          /* La pupila se desplaza 50% más que la párpara, y se recorta dentro del bbox del anillo

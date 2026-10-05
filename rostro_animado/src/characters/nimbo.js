@@ -43,7 +43,7 @@ window.MoodMates.characters.register({
   },
 
   features: {
-    mouth: { w: 23, dy: 32 },
+    mouth: { w: 34, dy: 32 },
     blush: { dx: 41, dy: 20, rx: 12, ry: 7, max: 0.8 }
   },
 

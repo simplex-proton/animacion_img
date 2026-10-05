@@ -1,3 +1,4 @@
+//+++ rostro_animado/src/core/features.js 
 /* ============================================================
  * features.js —— Sistema de rasgos faciales y accesorios enlazados
  *
@@ -272,13 +273,31 @@
 
       /* ---------------- Boca ---------------- */
       var mouthNode = null, mouthCfg = null, lastMouthRing = null;
+      var mouthShadow = null, mouthInnerG = null, mouthCavity = null, mouthTongue = null, mouthClipPath = null;
       if (feats.mouth) {
          mouthCfg = Object.assign(
             { dy: 36, color: palette.mouth || palette.eye },
             feats.mouth === true ? {} : feats.mouth
          );
+         /* v2.0: boca con volumen —— sombra bajo el labio inferior (debajo del anillo) */
+         mouthShadow = el('ellipse', { fill: '#000000', opacity: 0.1, 'pointer-events': 'none' });
+         front.appendChild(mouthShadow);
          mouthNode = el('path', { fill: mouthCfg.color, stroke: 'none' });
          front.appendChild(mouthNode);
+         /* v2.0: interior de la boca grande —— cavidad + lengua recortadas por el propio anillo.
+          * Solo se muestran cuando la boca abre lo suficiente (alto visible > umbral), de modo que
+          * las formas cerradas (smile/flat) siguen siendo un trazo limpio. */
+         var mclipId = ctx.uid + 'mc';
+         var mcp = el('clipPath', { id: mclipId, clipPathUnits: 'userSpaceOnUse' });
+         mouthClipPath = el('path', {});
+         mcp.appendChild(mouthClipPath);
+         ctx.defs.appendChild(mcp);
+         mouthInnerG = el('g', { 'clip-path': 'url(#' + mclipId + ')', display: 'none' });
+         mouthCavity = el('path', { fill: mouthCfg.innerColor || palette.mouthInner || shade(mouthCfg.color, -0.55) });
+         mouthTongue = el('ellipse', { fill: mouthCfg.tongueColor || palette.tongue || '#E88A9A' });
+         mouthInnerG.appendChild(mouthCavity);
+         mouthInnerG.appendChild(mouthTongue);
+         front.appendChild(mouthInnerG);
       }
 
       /* ---------------- Por fotograma ---------------- */
@@ -341,17 +360,50 @@
             var ring = f.mouthRing;
             if (ring && ring !== lastMouthRing) {
                lastMouthRing = ring;
-               mouthNode.setAttribute('d', ringPath(ring));
+               var md = ringPath(ring);
+               mouthNode.setAttribute('d', md);
+               /* el clip del interior usa el MISMO path de la boca (coordenadas locales) */
+               if (mouthClipPath) mouthClipPath.setAttribute('d', md);
             }
             var my = C + face.y + (mouthCfg.dy + (f.mouthY || 0)) * face.sy;
             var pm = project((f.mouthX || 0) * face.sx, my, yaw);
             if (!pm || sketch > 0.5) {
                mouthNode.style.display = 'none';
+               if (mouthShadow) mouthShadow.style.display = 'none';
+               if (mouthInnerG) mouthInnerG.style.display = 'none';
             } else {
+               var mtf = 'translate(' + r2(pm.x) + ' ' + r2(my) + ')' +
+                  ' scale(' + r2((f.mouthSX || 1) * pm.cn * face.eye) + ' ' + r2((f.mouthSY || 1) * face.eye) + ')';
                mouthNode.style.display = '';
-               mouthNode.setAttribute('transform',
-                  'translate(' + r2(pm.x) + ' ' + r2(my) + ')' +
-                  ' scale(' + r2((f.mouthSX || 1) * pm.cn * face.eye) + ' ' + r2((f.mouthSY || 1) * face.eye) + ')');
+               mouthNode.setAttribute('transform', mtf);
+               /* altura visible del anillo para decidir sombra / interior */
+               var mh = ring ? Math.abs(Math.max.apply(null, ring.map(function (p) { return p[1]; })) -
+                                        Math.min.apply(null, ring.map(function (p) { return p[1]; }))) : 0;
+               if (mouthShadow) {
+                  mouthShadow.style.display = mh > 3 ? '' : 'none';
+                  mouthShadow.setAttribute('cx', 0); mouthShadow.setAttribute('cy', 0);
+                  mouthShadow.setAttribute('rx', r2((ring ? Math.abs(ring[0][0]) : 10) * 0.8));
+                  mouthShadow.setAttribute('ry', 3);
+                  mouthShadow.setAttribute('transform',
+                     'translate(' + r2(pm.x) + ' ' + r2(my + (mh / 2 + 3) * (f.mouthSY || 1) * face.eye) + ')' +
+                     ' scale(' + r2((f.mouthSX || 1) * pm.cn * face.eye) + ' ' + r2(face.eye) + ')');
+               }
+               /* interior solo en bocas bien abiertas (grin/laugh/open/o…) */
+               if (mouthInnerG) {
+                  if (mh > 9) {
+                     mouthInnerG.style.display = '';
+                     mouthInnerG.setAttribute('transform', mtf);
+                     var iw = ring ? Math.abs(ring[0][0]) : 14;
+                     mouthCavity.setAttribute('d',
+                        'M ' + r2(-iw * 0.86) + ' 0 A ' + r2(iw) + ' ' + r2(mh * 0.55) + ' 0 0 0 ' + r2(iw * 0.86) + ' 0 Z');
+                     mouthTongue.setAttribute('cx', 0);
+                     mouthTongue.setAttribute('cy', r2(mh * 0.28));
+                     mouthTongue.setAttribute('rx', r2(iw * 0.55));
+                     mouthTongue.setAttribute('ry', r2(mh * 0.2));
+                  } else {
+                     mouthInnerG.style.display = 'none';
+                  }
+               }
             }
          }
 
